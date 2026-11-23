@@ -1,0 +1,28 @@
+# .NET / Visual Studio / Rider
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+*.DotSettings.user
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Published releases & local reports
+releases/
+*.zip
+OptiPulse_Report_*.html
+OptiPulse_Report_*.md
+OptiPulse_Report_*.json
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

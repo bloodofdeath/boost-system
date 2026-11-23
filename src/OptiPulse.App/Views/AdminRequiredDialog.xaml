@@ -1,0 +1,56 @@
+<Window x:Class="OptiPulse.App.Views.AdminRequiredDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Запрос прав администратора"
+        Width="500" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize">
+
+    <Border Background="#151820"
+            BorderBrush="#3A3122"
+            BorderThickness="1"
+            CornerRadius="14"
+            Margin="12">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" BlurRadius="28" ShadowDepth="8" Opacity="0.65"/>
+        </Border.Effect>
+
+        <StackPanel Margin="24">
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Width="44" Height="44" CornerRadius="11" Background="#2B2214" BorderBrush="#664B1B" BorderThickness="1" Margin="0,0,14,0">
+                    <Path Data="{StaticResource IconShield}" Fill="#F59E0B" Width="22" Height="22" Stretch="Uniform"/>
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" FontSize="16" FontWeight="Bold" Foreground="#F3F5F8" TextWrapping="Wrap"/>
+                    <TextBlock Text="Запрос контроля учётных записей Windows (UAC)" FontSize="12" Foreground="#FBBF24" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Grid>
+
+            <TextBlock x:Name="ExplanationText"
+                       FontSize="13"
+                       Foreground="#CBD2DF"
+                       TextWrapping="Wrap"
+                       LineHeight="20"
+                       Margin="0,0,0,16"/>
+
+            <Border Background="#11141B" BorderBrush="#232936" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,20">
+                <TextBlock Text="Безопасность: перед любым изменением OptiPulse сохраняет резервную копию исходных параметров Windows. Вы в любой момент можете откатить всё обратно."
+                           FontSize="12" Foreground="#8E95A5" TextWrapping="Wrap"/>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Отмена" Style="{StaticResource DarkSecondaryButton}" MinWidth="100" Margin="0,0,10,0" Click="Cancel_Click"/>
+                <Button Content="🛡 Запросить права администратора" Style="{StaticResource MintPrimaryButton}" Padding="16,9" Click="Approve_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
