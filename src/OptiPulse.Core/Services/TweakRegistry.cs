@@ -36,6 +36,16 @@ public sealed class TweakRegistry
 
     public ITweak? FindById(string id) => _byId.TryGetValue(id, out var tweak) ? tweak : null;
 
+    /// <summary>
+    /// Queries live Windows states of all 14 tweaks concurrently while preserving catalog order.
+    /// </summary>
+    public List<(ITweak Tweak, TweakStatusInfo Status)> QueryAllStatusesParallel() =>
+        _tweaks
+            .AsParallel()
+            .AsOrdered()
+            .Select(t => (t, t.GetStatus()))
+            .ToList();
+
     public (int Reverted, int Failed, bool AdminRequired) RevertAllBackedUp(BackupService backup, AppLogger logger)
     {
         var snapshot = backup.GetSnapshot();
@@ -46,17 +56,34 @@ public sealed class TweakRegistry
         foreach (var tweakId in snapshot.Tweaks.Keys.ToList())
         {
             var tweak = FindById(tweakId);
-            if (tweak is null) continue;
-
-            var res = tweak.Revert();
-            if (res.Success)
+            if (tweak is not null)
             {
-                reverted++;
+                var res = tweak.Revert();
+                if (res.Success)
+                {
+                    reverted++;
+                }
+                else
+                {
+                    failed++;
+                    if (res.RequiresAdmin) adminRequired = true;
+                }
+                continue;
             }
-            else
+
+            // Also revert QuickSettings (e.g., quick_disable_transparency, quick_disable_bg_uwp, quick_minimize_telemetry)
+            if (QuickSettingsService.IsQuickSettingBackupKey(tweakId))
             {
-                failed++;
-                if (res.RequiresAdmin) adminRequired = true;
+                var (ok, _, needsAdmin) = QuickSettingsService.Revert(tweakId, backup, logger);
+                if (ok)
+                {
+                    reverted++;
+                }
+                else
+                {
+                    failed++;
+                    if (needsAdmin) adminRequired = true;
+                }
             }
         }
 
@@ -85,7 +112,7 @@ public sealed class TweakRegistry
 
         foreach (var startup in snapshot.DisabledStartupItems.Values.ToList())
         {
-            var (ok, msg, needsAdmin) = PcAnalyzerService.RestoreStartupItemStatic(startup, backup, logger);
+            var (ok, msg, needsAdmin) = StartupManagerService.RestoreStartupItem(startup, backup, logger);
             if (ok)
             {
                 reverted++;

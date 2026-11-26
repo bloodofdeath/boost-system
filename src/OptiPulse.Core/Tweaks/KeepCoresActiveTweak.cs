@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using OptiPulse.Core.Models;
 using OptiPulse.Core.Services;
@@ -6,7 +5,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 4. Держать все ядра активными (отключение парковки ядер CPU)
+/// 10. Держать все ядра активными (отключение парковки ядер CPU)
 /// </summary>
 public sealed class KeepCoresActiveTweak : TweakBase
 {
@@ -15,9 +14,7 @@ public sealed class KeepCoresActiveTweak : TweakBase
     private const string CpMinCoresHetero = "0cc5b647-c1df-4637-891a-dec35c318584";
     private const string PowerSettingRegKey = @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583";
 
-    public KeepCoresActiveTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "unpark_cpu_cores",
         Title = "Держать все ядра активными",
@@ -31,9 +28,13 @@ public sealed class KeepCoresActiveTweak : TweakBase
         RequiresAdmin = true
     };
 
+    public KeepCoresActiveTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
+
     public override TweakStatusInfo GetStatus()
     {
-        var currentAc = QueryAcHexIndex(CpMinCores);
+        var currentAc = PowerCfgHelper.QueryAcValueIndex(SubProcessor, CpMinCores);
         var valueMax = RegistryHelper.ReadDword(RegistryHelper.Hklm, PowerSettingRegKey, "ValueMax");
         var enabled = currentAc == 100 || valueMax == 0;
 
@@ -57,12 +58,12 @@ public sealed class KeepCoresActiveTweak : TweakBase
         var entry = Backup.GetOrCreateTweakBackup(Descriptor.Id);
         if (!entry.Metadata.ContainsKey("OriginalCpMinCoresAc"))
         {
-            var origAc = QueryAcHexIndex(CpMinCores) ?? 5;
+            var origAc = PowerCfgHelper.QueryAcValueIndex(SubProcessor, CpMinCores) ?? 5;
             entry.Metadata["OriginalCpMinCoresAc"] = origAc.ToString();
         }
         if (!entry.Metadata.ContainsKey("OriginalCpMinCoresHeteroAc"))
         {
-            var origHetero = QueryAcHexIndex(CpMinCoresHetero);
+            var origHetero = PowerCfgHelper.QueryAcValueIndex(SubProcessor, CpMinCoresHetero);
             if (origHetero.HasValue)
             {
                 entry.Metadata["OriginalCpMinCoresHeteroAc"] = origHetero.Value.ToString();
@@ -73,17 +74,16 @@ public sealed class KeepCoresActiveTweak : TweakBase
         RegistryHelper.BackupAndWrite(entry, RegistryHelper.Hklm, PowerSettingRegKey, "Attributes", 0, RegistryValueKind.DWord);
         RegistryHelper.BackupAndWrite(entry, RegistryHelper.Hklm, PowerSettingRegKey, "ValueMax", 100, RegistryValueKind.DWord);
 
-        var r1 = CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubProcessor} {CpMinCores} 100", 8000);
-        CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubProcessor} {CpMinCoresHetero} 100", 8000);
-        CommandRunner.Run("powercfg", "/setactive scheme_current", 8000);
-
-        Backup.SaveTweakBackup(entry);
+        var r1 = PowerCfgHelper.SetAcValueIndex(SubProcessor, CpMinCores, 100);
+        PowerCfgHelper.SetAcValueIndex(SubProcessor, CpMinCoresHetero, 100);
+        PowerCfgHelper.ApplyCurrentScheme();
 
         if (!r1.Success)
         {
             return TweakOperationResult.Fail($"powercfg вернул ошибку: {r1.CombinedOutput}", GetStatus().IsEnabled);
         }
 
+        Backup.SaveTweakBackup(entry);
         return TweakOperationResult.Ok(true, "Парковка ядер процессора отключена (100% ядер активны от сети).");
     }
 
@@ -106,38 +106,20 @@ public sealed class KeepCoresActiveTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        // Ensure ValueMax allows normal range 0..100 if previously locked to 0 externally
+        if (RegistryHelper.ReadDword(RegistryHelper.Hklm, PowerSettingRegKey, "ValueMax") == 0)
         {
-            // If previously disabled externally via ValueMax=0, restore standard range 0..100
             RegistryHelper.WriteValue(RegistryHelper.Hklm, PowerSettingRegKey, "ValueMax", 100, RegistryValueKind.DWord);
         }
 
-        CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubProcessor} {CpMinCores} {restoreValue}", 8000);
+        PowerCfgHelper.SetAcValueIndex(SubProcessor, CpMinCores, restoreValue);
         if (restoreHetero.HasValue)
         {
-            CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubProcessor} {CpMinCoresHetero} {restoreHetero.Value}", 8000);
+            PowerCfgHelper.SetAcValueIndex(SubProcessor, CpMinCoresHetero, restoreHetero.Value);
         }
-        CommandRunner.Run("powercfg", "/setactive scheme_current", 8000);
+        PowerCfgHelper.ApplyCurrentScheme();
 
         return TweakOperationResult.Ok(false, $"Парковка ядер восстановлена (минимум активных ядер: {restoreValue}%).");
-    }
-
-    private static int? QueryAcHexIndex(string settingGuid)
-    {
-        // /qh queries hidden power settings as well (works without Administrator privileges)
-        var result = CommandRunner.Run("powercfg", $"/qh scheme_current {SubProcessor} {settingGuid}", 8000);
-        if (!result.Success || string.IsNullOrWhiteSpace(result.StandardOutput)) return null;
-
-        var matches = Regex.Matches(result.StandardOutput, @"0x([0-9a-fA-F]{8})");
-        if (matches.Count >= 2)
-        {
-            // Last two hex indices are always Current AC Power Setting Index and Current DC Power Setting Index
-            var acHex = matches[matches.Count - 2].Groups[1].Value;
-            if (int.TryParse(acHex, System.Globalization.NumberStyles.HexNumber, null, out var value))
-            {
-                return value;
-            }
-        }
-        return null;
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Win32;
 using OptiPulse.Core.Models;
 
@@ -8,18 +9,21 @@ public static class RegistryHelper
     public const string Hklm = "HKLM";
     public const string Hkcu = "HKCU";
 
-    private static RegistryKey GetBaseKey(string root) =>
+    public static RegistryKey OpenBaseKey(string root) =>
         root.Equals(Hklm, StringComparison.OrdinalIgnoreCase)
             ? RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64)
             : RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
 
-    public static object? ReadValue(string root, string subKey, string valueName)
+    public static object? ReadValue(string root, string subKey, string valueName, bool expandEnvironmentNames = false)
     {
         try
         {
-            using var baseKey = GetBaseKey(root);
+            using var baseKey = OpenBaseKey(root);
             using var key = baseKey.OpenSubKey(subKey, writable: false);
-            return key?.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            var options = expandEnvironmentNames
+                ? RegistryValueOptions.None
+                : RegistryValueOptions.DoNotExpandEnvironmentNames;
+            return key?.GetValue(valueName, null, options);
         }
         catch
         {
@@ -36,14 +40,14 @@ public static class RegistryHelper
             int i => i,
             uint u => unchecked((int)u),
             long l => unchecked((int)l),
-            string s when int.TryParse(s, out var parsed) => parsed,
+            string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => null
         };
     }
 
-    public static string? ReadString(string root, string subKey, string valueName)
+    public static string? ReadString(string root, string subKey, string valueName, bool expandEnvironmentNames = false)
     {
-        var raw = ReadValue(root, subKey, valueName);
+        var raw = ReadValue(root, subKey, valueName, expandEnvironmentNames);
         return raw?.ToString();
     }
 
@@ -59,7 +63,7 @@ public static class RegistryHelper
 
         try
         {
-            using var baseKey = GetBaseKey(root);
+            using var baseKey = OpenBaseKey(root);
             using var key = baseKey.OpenSubKey(subKey, writable: false);
             if (key is null) return backup;
 
@@ -81,7 +85,7 @@ public static class RegistryHelper
 
     public static void WriteValue(string root, string subKey, string valueName, object value, RegistryValueKind kind)
     {
-        using var baseKey = GetBaseKey(root);
+        using var baseKey = OpenBaseKey(root);
         using var key = baseKey.CreateSubKey(subKey, writable: true)
             ?? throw new InvalidOperationException($"Не удалось открыть или создать раздел реестра {root}\\{subKey}");
         key.SetValue(valueName, value, kind);
@@ -89,10 +93,10 @@ public static class RegistryHelper
 
     public static void DeleteValue(string root, string subKey, string valueName)
     {
-        using var baseKey = GetBaseKey(root);
+        using var baseKey = OpenBaseKey(root);
         using var key = baseKey.OpenSubKey(subKey, writable: true);
         if (key is null) return;
-        if (key.GetValue(valueName) is not null)
+        if (key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not null)
         {
             key.DeleteValue(valueName, throwOnMissingValue: false);
         }
@@ -106,7 +110,7 @@ public static class RegistryHelper
             return;
         }
 
-        if (!Enum.TryParse<RegistryValueKind>(backup.ValueKind, out var kind))
+        if (!Enum.TryParse<RegistryValueKind>(backup.ValueKind, ignoreCase: true, out var kind))
         {
             kind = RegistryValueKind.String;
         }
@@ -145,7 +149,7 @@ public static class RegistryHelper
         var result = new List<string>();
         try
         {
-            using var baseKey = GetBaseKey(root);
+            using var baseKey = OpenBaseKey(root);
             using var key = baseKey.OpenSubKey(subKey, writable: false);
             if (key is not null)
             {
@@ -154,7 +158,7 @@ public static class RegistryHelper
         }
         catch
         {
-            // Ignore
+            // Ignore restricted keys
         }
 
         return result;
@@ -164,7 +168,7 @@ public static class RegistryHelper
     {
         RegistryValueKind.Binary when value is byte[] bytes => Convert.ToBase64String(bytes),
         RegistryValueKind.MultiString when value is string[] arr => string.Join("\u001F", arr),
-        _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
     };
 
     private static object DeserializeValue(string? serialized, RegistryValueKind kind)
@@ -172,8 +176,8 @@ public static class RegistryHelper
         var s = serialized ?? string.Empty;
         return kind switch
         {
-            RegistryValueKind.DWord => int.TryParse(s, out var i) ? i : 0,
-            RegistryValueKind.QWord => long.TryParse(s, out var l) ? l : 0L,
+            RegistryValueKind.DWord => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : 0,
+            RegistryValueKind.QWord => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l) ? l : 0L,
             RegistryValueKind.Binary => string.IsNullOrEmpty(s) ? Array.Empty<byte>() : Convert.FromBase64String(s),
             RegistryValueKind.MultiString => string.IsNullOrEmpty(s) ? Array.Empty<string>() : s.Split('\u001F'),
             _ => s

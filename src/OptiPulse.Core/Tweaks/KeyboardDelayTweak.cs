@@ -6,7 +6,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 12. Сократить время ввода с клавиатуры
+/// 4. Сократить время ввода с клавиатуры
 /// </summary>
 public sealed class KeyboardDelayTweak : TweakBase
 {
@@ -16,12 +16,7 @@ public sealed class KeyboardDelayTweak : TweakBase
     private const uint SpifUpdateIniFile = 0x01;
     private const uint SpifSendChange = 0x02;
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
-    public KeyboardDelayTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "reduce_keyboard_delay",
         Title = "Сократить время ввода с клавиатуры",
@@ -33,6 +28,13 @@ public sealed class KeyboardDelayTweak : TweakBase
         NoticeLevel = TweakNoticeLevel.None,
         RequiresAdmin = false
     };
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    public KeyboardDelayTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -66,7 +68,8 @@ public sealed class KeyboardDelayTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, KeyboardKey, "KeyboardDelay", "1", RegistryValueKind.String);
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, KeyboardKey, "KeyboardSpeed", "31", RegistryValueKind.String);

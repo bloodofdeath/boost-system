@@ -5,7 +5,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 14. Максимальная производительность для игр
+/// 6. Максимальная производительность для игр
 /// </summary>
 public sealed class MaxGamingPerformanceTweak : TweakBase
 {
@@ -13,9 +13,7 @@ public sealed class MaxGamingPerformanceTweak : TweakBase
     private const string MmcssGamesKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games";
     private const string PowerThrottlingKey = @"SYSTEM\CurrentControlSet\Control\Power\PowerThrottling";
 
-    public MaxGamingPerformanceTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "max_gaming_performance",
         Title = "Максимальная производительность для игр",
@@ -27,6 +25,10 @@ public sealed class MaxGamingPerformanceTweak : TweakBase
         NoticeLevel = TweakNoticeLevel.None,
         RequiresAdmin = true
     };
+
+    public MaxGamingPerformanceTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -76,7 +78,8 @@ public sealed class MaxGamingPerformanceTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
             RegistryHelper.WriteValue(RegistryHelper.Hklm, MmcssGamesKey, "GPU Priority", 8, RegistryValueKind.DWord);
             RegistryHelper.WriteValue(RegistryHelper.Hklm, MmcssGamesKey, "Priority", 2, RegistryValueKind.DWord);

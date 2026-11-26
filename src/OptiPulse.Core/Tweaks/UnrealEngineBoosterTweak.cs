@@ -14,8 +14,8 @@ public static class UnrealEngineIniPatcher
     public const string BeginMarker = "; === BEGIN OPTIPULSE UNREAL ENGINE BOOSTER ===";
     public const string EndMarker = "; === END OPTIPULSE UNREAL ENGINE BOOSTER ===";
 
-    private static readonly string OptimizationBlock = string.Join(Environment.NewLine, new[]
-    {
+    private static readonly string OptimizationBlock = string.Join(Environment.NewLine,
+    [
         BeginMarker,
         "[SystemSettings]",
         "r.CreateShadersOnLoad=1",
@@ -33,7 +33,7 @@ public static class UnrealEngineIniPatcher
         "r.Streaming.LimitPoolSizeToVRAM=1",
         "niagara.CreateShadersOnLoad=1",
         EndMarker
-    });
+    ]);
 
     public static bool IsPatched(string content) =>
         content.Contains(BeginMarker, StringComparison.Ordinal) &&
@@ -73,13 +73,11 @@ public static class UnrealEngineIniPatcher
 }
 
 /// <summary>
-/// 9. Ускоритель Unreal Engine [Бета]
+/// 1. Ускоритель Unreal Engine [Бета]
 /// </summary>
 public sealed class UnrealEngineBoosterTweak : TweakBase
 {
-    public UnrealEngineBoosterTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "unreal_engine_booster",
         Title = "Ускоритель Unreal Engine",
@@ -90,9 +88,30 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
         Category = TweakCategory.GpuAndGaming,
         NoticeLevel = TweakNoticeLevel.Info,
         NoticeTooltip = "Перед включением запустите каждую UE4/UE5 игру хотя бы один раз, чтобы создался Engine.ini.",
-        IsBeta = true,
         RequiresAdmin = false
     };
+
+    // Known large non-game folders in %LOCALAPPDATA% skipped to prevent slow recursive directory scans
+    private static readonly HashSet<string> IgnoredLocalAppDataFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Temp", "Microsoft", "Packages", "Google", "Mozilla", "BraveSoftware", "Yandex",
+        "Opera Software", "Discord", "Steam", "NuGet", "pip", "npm-cache", "Programs",
+        "ConnectedDevicesPlatform", "CrashDumps", "D3DSCache", "NVIDIA", "NVIDIA Corporation",
+        "AMD", "Intel", "GitHubDesktop", "Docker", "JetBrains", "Application Data",
+        "History", "Temporary Internet Files", "CefSharp", "Electron", "SquirrelTemp",
+        "Comms", "Publishers", "PlaceholderTileLogoFolder", "VirtualStore"
+    };
+
+    private static readonly string[] ConfigSubVariants =
+    [
+        Path.Combine("Saved", "Config", "WindowsNoEditor", "Engine.ini"),
+        Path.Combine("Saved", "Config", "WindowsClient", "Engine.ini"),
+        Path.Combine("Saved", "Config", "Windows", "Engine.ini")
+    ];
+
+    public UnrealEngineBoosterTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -128,12 +147,13 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
             try
             {
                 var info = new FileInfo(iniPath);
-                if (info.IsReadOnly) continue; // Respect user-locked read-only configs
+                if (info.IsReadOnly) continue;
 
                 var content = File.ReadAllText(iniPath, Encoding.UTF8);
                 if (!backupMap.ContainsKey(iniPath))
                 {
-                    var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(iniPath)))[..12];
+                    var normalizedKey = iniPath.ToUpperInvariant();
+                    var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey)))[..12];
                     var backupFile = Path.Combine(ueBackupFolder, $"Engine_{hash}.ini.bak");
                     File.WriteAllText(backupFile, content, Encoding.UTF8);
                     backupMap[iniPath] = backupFile;
@@ -159,7 +179,7 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
             return TweakOperationResult.Ok(true, "Ускоритель включён, но профили UE4/UE5 не найдены. Запустите игру на Unreal Engine хотя бы один раз и переключите опцию снова.");
         }
 
-        var gamesPreview = string.Join(", ", patchedGames.Distinct().Take(5));
+        var gamesPreview = string.Join(", ", patchedGames.Distinct(StringComparer.OrdinalIgnoreCase).Take(5));
         return TweakOperationResult.Ok(true, $"Оптимизировано конфигов UE4/UE5: {patchedCount} ({gamesPreview}).");
     }
 
@@ -231,13 +251,6 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games")
         };
 
-        var subVariants = new[]
-        {
-            Path.Combine("Saved", "Config", "WindowsNoEditor", "Engine.ini"),
-            Path.Combine("Saved", "Config", "WindowsClient", "Engine.ini"),
-            Path.Combine("Saved", "Config", "Windows", "Engine.ini")
-        };
-
         foreach (var root in roots)
         {
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
@@ -245,30 +258,24 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
             {
                 foreach (var gameDir in Directory.EnumerateDirectories(root))
                 {
-                    foreach (var variant in subVariants)
-                    {
-                        var candidate = Path.Combine(gameDir, variant);
-                        if (File.Exists(candidate))
-                        {
-                            found.Add(candidate);
-                        }
-                    }
+                    var dirName = Path.GetFileName(gameDir);
+                    if (IgnoredLocalAppDataFolders.Contains(dirName)) continue;
+
+                    ProbeDirectoryVariants(gameDir, found);
 
                     // Some UE games nest one level deeper: LocalAppData\<Studio>\<Game>\Saved\Config\...
                     try
                     {
                         foreach (var nestedDir in Directory.EnumerateDirectories(gameDir))
                         {
-                            var name = Path.GetFileName(nestedDir);
-                            if (name.Equals("Saved", StringComparison.OrdinalIgnoreCase)) continue;
-                            foreach (var variant in subVariants)
+                            var nestedName = Path.GetFileName(nestedDir);
+                            if (nestedName.Equals("Saved", StringComparison.OrdinalIgnoreCase) ||
+                                IgnoredLocalAppDataFolders.Contains(nestedName))
                             {
-                                var candidate = Path.Combine(nestedDir, variant);
-                                if (File.Exists(candidate))
-                                {
-                                    found.Add(candidate);
-                                }
+                                continue;
                             }
+
+                            ProbeDirectoryVariants(nestedDir, found);
                         }
                     }
                     catch
@@ -286,14 +293,32 @@ public sealed class UnrealEngineBoosterTweak : TweakBase
         return found.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    private static void ProbeDirectoryVariants(string baseDir, HashSet<string> found)
+    {
+        var savedDir = Path.Combine(baseDir, "Saved");
+        if (!Directory.Exists(savedDir)) return;
+
+        foreach (var variant in ConfigSubVariants)
+        {
+            var candidate = Path.Combine(baseDir, variant);
+            if (File.Exists(candidate))
+            {
+                found.Add(candidate);
+            }
+        }
+    }
+
     private static Dictionary<string, string> LoadBackupMap(TweakBackupEntry entry)
     {
         if (entry.Metadata.TryGetValue("BackupMapJson", out var json) && !string.IsNullOrWhiteSpace(json))
         {
             try
             {
-                return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                if (parsed is not null)
+                {
+                    return new Dictionary<string, string>(parsed, StringComparer.OrdinalIgnoreCase);
+                }
             }
             catch { }
         }

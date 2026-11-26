@@ -4,15 +4,13 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 7. Отключить индексацию файлов Windows (служба WSearch)
+/// 13. Отключить индексацию файлов Windows (служба WSearch)
 /// </summary>
 public sealed class WindowsSearchIndexingTweak : TweakBase
 {
     private const string ServiceName = "WSearch";
 
-    public WindowsSearchIndexingTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_windows_search",
         Title = "Отключить индексацию файлов Windows",
@@ -24,6 +22,10 @@ public sealed class WindowsSearchIndexingTweak : TweakBase
         NoticeLevel = TweakNoticeLevel.None,
         RequiresAdmin = true
     };
+
+    public WindowsSearchIndexingTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {

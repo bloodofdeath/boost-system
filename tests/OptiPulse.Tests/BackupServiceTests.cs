@@ -14,10 +14,11 @@ public sealed class BackupServiceTests : IDisposable
     }
 
     [Fact]
-    public void BackupService_PersistsAndReloadsTweakServiceAndStartupBackups()
+    public void BackupService_PersistsReloadsAndPreservesCaseInsensitiveLookups()
     {
         var service1 = new BackupService(_tempDir);
         var entry = service1.GetOrCreateTweakBackup("minimal_bg_priority");
+        entry.Metadata["CustomKey"] = "Value1";
         entry.RegistryValues.Add(new RegistryValueBackup
         {
             Root = "HKLM",
@@ -27,6 +28,10 @@ public sealed class BackupServiceTests : IDisposable
             ValueKind = "DWord",
             SerializedValue = "2"
         });
+
+        // Unsaved entry must NOT pollute the store before SaveTweakBackup is called
+        Assert.Equal(0, service1.TotalBackupEntriesCount);
+
         service1.SaveTweakBackup(entry);
 
         service1.SaveDisabledService(new ServiceBackup
@@ -41,25 +46,32 @@ public sealed class BackupServiceTests : IDisposable
             Id = "HKCU:Run:Discord",
             Name = "Discord",
             Location = "HKCU Run",
-            Command = "\"C:\\Discord\\Update.exe\""
+            Command = "\"C:\\Discord\\Update.exe\"",
+            ValueKind = "ExpandString"
         });
 
-        // Reload in a brand new instance to verify disk persistence
+        // Reload in a brand new instance to verify disk persistence AND case-insensitive dictionary keys
         var service2 = new BackupService(_tempDir);
         Assert.Equal(3, service2.TotalBackupEntriesCount);
 
-        var loadedTweak = service2.GetTweakBackup("minimal_bg_priority");
+        var loadedTweak = service2.GetTweakBackup("MINIMAL_BG_PRIORITY");
         Assert.NotNull(loadedTweak);
         Assert.Single(loadedTweak!.RegistryValues);
         Assert.Equal("2", loadedTweak.RegistryValues[0].SerializedValue);
+        Assert.Equal("Value1", loadedTweak.Metadata["customkey"]);
 
-        var loadedSvc = service2.GetDisabledService("DiagTrack");
+        var loadedSvc = service2.GetDisabledService("diagtrack");
         Assert.NotNull(loadedSvc);
         Assert.Equal(2, loadedSvc!.OriginalStartMode);
 
-        var loadedStartup = service2.GetDisabledStartupItem("HKCU:Run:Discord");
+        var loadedStartup = service2.GetDisabledStartupItem("hkcu:run:discord");
         Assert.NotNull(loadedStartup);
         Assert.Equal("Discord", loadedStartup!.Name);
+        Assert.Equal("ExpandString", loadedStartup.ValueKind);
+
+        // Mutating returned defensive clone must not mutate internal store without SaveTweakBackup
+        loadedTweak.RegistryValues.Clear();
+        Assert.Single(service2.GetTweakBackup("minimal_bg_priority")!.RegistryValues);
 
         service2.RemoveTweakBackup("minimal_bg_priority");
         Assert.Null(service2.GetTweakBackup("minimal_bg_priority"));

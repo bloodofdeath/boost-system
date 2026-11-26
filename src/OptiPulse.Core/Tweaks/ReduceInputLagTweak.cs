@@ -6,7 +6,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 11. Уменьшить задержку ввода.
+/// 3. Уменьшить задержку ввода.
 /// </summary>
 public sealed class ReduceInputLagTweak : TweakBase
 {
@@ -20,12 +20,7 @@ public sealed class ReduceInputLagTweak : TweakBase
     private const uint SpifUpdateIniFile = 0x01;
     private const uint SpifSendChange = 0x02;
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, int[] pvParam, uint fWinIni);
-
-    public ReduceInputLagTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "reduce_input_lag",
         Title = "Уменьшить задержку ввода.",
@@ -35,8 +30,16 @@ public sealed class ReduceInputLagTweak : TweakBase
         IconKey = "IconInputLag",
         Category = TweakCategory.NetworkAndInput,
         NoticeLevel = TweakNoticeLevel.None,
-        RequiresAdmin = true
+        RequiresAdmin = true,
+        RequiresRebootForFullEffect = true
     };
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, int[] pvParam, uint fWinIni);
+
+    public ReduceInputLagTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -73,7 +76,7 @@ public sealed class ReduceInputLagTweak : TweakBase
         RegistryHelper.BackupAndWrite(entry, RegistryHelper.Hklm, KbdClassKey, "KeyboardDataQueueSize", 20, RegistryValueKind.DWord);
 
         Backup.SaveTweakBackup(entry);
-        return TweakOperationResult.Ok(true, "Задержка ввода оптимизирована (Raw Input мыши, точный таймер ядра, уменьшенные буферы ввода).");
+        return TweakOperationResult.Ok(true, "Задержка ввода оптимизирована (Raw Input мыши, точный таймер ядра, уменьшенные буферы ввода). Рекомендуется перезагрузка.", rebootRecommended: true);
     }
 
     protected override TweakOperationResult RevertCore()
@@ -84,7 +87,8 @@ public sealed class ReduceInputLagTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, MouseKey, "MouseSpeed", "1", RegistryValueKind.String);
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, MouseKey, "MouseThreshold1", "6", RegistryValueKind.String);

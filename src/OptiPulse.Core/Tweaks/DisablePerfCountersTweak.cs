@@ -5,11 +5,12 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 13. Выключить счетчики производительности Windows
+/// 5. Выключить счетчики производительности Windows
 /// </summary>
 public sealed class DisablePerfCountersTweak : TweakBase
 {
     private const string PerflibMasterKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib";
+    private const string ValueName = "Disable Performance Counters";
 
     private static readonly string[] ServicePerfKeys =
     [
@@ -20,11 +21,7 @@ public sealed class DisablePerfCountersTweak : TweakBase
         @"SYSTEM\CurrentControlSet\Services\Tcpip\Performance"
     ];
 
-    private const string ValueName = "Disable Performance Counters";
-
-    public DisablePerfCountersTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_perf_counters",
         Title = "Выключить счетчики производительности Windows",
@@ -37,6 +34,10 @@ public sealed class DisablePerfCountersTweak : TweakBase
         NoticeTooltip = "Отключает фоновые счётчики PerfMon; Диспетчер задач Windows и диагностика OptiPulse продолжат работать.",
         RequiresAdmin = true
     };
+
+    public DisablePerfCountersTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -77,7 +78,6 @@ public sealed class DisablePerfCountersTweak : TweakBase
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
 
-        // Also ensure global master switch is re-enabled if it was disabled externally before OptiPulse ran
         if (RegistryHelper.ReadDword(RegistryHelper.Hklm, PerflibMasterKey, ValueName) == 1)
         {
             RegistryHelper.DeleteValue(RegistryHelper.Hklm, PerflibMasterKey, ValueName);

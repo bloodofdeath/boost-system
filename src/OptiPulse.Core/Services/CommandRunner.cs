@@ -17,26 +17,22 @@ public static class CommandRunner
     {
         try
         {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = fileName,
-                    Arguments = arguments,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
-                }
-            };
-
+            using var process = CreateProcess(fileName, arguments);
             var output = new StringBuilder();
             var error = new StringBuilder();
+            using var outDone = new ManualResetEventSlim(false);
+            using var errDone = new ManualResetEventSlim(false);
 
-            process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) error.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is null) outDone.Set();
+                else output.AppendLine(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is null) errDone.Set();
+                else error.AppendLine(e.Data);
+            };
 
             if (!process.Start())
             {
@@ -49,10 +45,13 @@ public static class CommandRunner
             if (!process.WaitForExit(timeoutMs))
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
-                return new CommandResult(-2, output.ToString(), $"Превышено время ожидания ({timeoutMs} мс) для {fileName}");
+                return new CommandResult(-2, output.ToString().Trim(), $"Превышено время ожидания ({timeoutMs} мс) для {fileName}");
             }
 
-            process.WaitForExit();
+            // Bounded wait on stream EOF so grandchild handle inheritance can never deadlock
+            outDone.Wait(500);
+            errDone.Wait(500);
+
             return new CommandResult(process.ExitCode, output.ToString().Trim(), error.ToString().Trim());
         }
         catch (Exception ex)
@@ -67,4 +66,19 @@ public static class CommandRunner
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(wrapped));
         return Run("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}", timeoutMs);
     }
+
+    private static Process CreateProcess(string fileName, string arguments) => new()
+    {
+        StartInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        }
+    };
 }

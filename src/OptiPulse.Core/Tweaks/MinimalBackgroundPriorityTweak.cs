@@ -5,16 +5,14 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 1. Минимальный приоритет для фоновых процессов
+/// 7. Минимальный приоритет для фоновых процессов
 /// </summary>
 public sealed class MinimalBackgroundPriorityTweak : TweakBase
 {
     private const string PriorityControlKey = @"SYSTEM\CurrentControlSet\Control\PriorityControl";
     private const string MultimediaKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile";
 
-    public MinimalBackgroundPriorityTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "minimal_bg_priority",
         Title = "Минимальный приоритет для фоновых процессов",
@@ -26,6 +24,10 @@ public sealed class MinimalBackgroundPriorityTweak : TweakBase
         NoticeLevel = TweakNoticeLevel.None,
         RequiresAdmin = true
     };
+
+    public MinimalBackgroundPriorityTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -58,9 +60,9 @@ public sealed class MinimalBackgroundPriorityTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
-            // Safe Windows defaults
             RegistryHelper.WriteValue(RegistryHelper.Hklm, PriorityControlKey, "Win32PrioritySeparation", 2, RegistryValueKind.DWord);
             RegistryHelper.WriteValue(RegistryHelper.Hklm, MultimediaKey, "SystemResponsiveness", 20, RegistryValueKind.DWord);
         }

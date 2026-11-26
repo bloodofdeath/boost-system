@@ -5,15 +5,13 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 5. Отключить временные метки последнего доступа (NTFS Last Access)
+/// 11. Отключить временные метки последнего доступа (NTFS Last Access)
 /// </summary>
-public sealed class NtfsLastAccessTweak : TweakBase
+public sealed partial class NtfsLastAccessTweak : TweakBase
 {
     private const string FileSystemKey = @"SYSTEM\CurrentControlSet\Control\FileSystem";
 
-    public NtfsLastAccessTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_ntfs_last_access",
         Title = "Отключить временные метки последнего доступа",
@@ -28,21 +26,18 @@ public sealed class NtfsLastAccessTweak : TweakBase
         RequiresRebootForFullEffect = true
     };
 
+    [GeneratedRegex(@"=\s*([0-3])", RegexOptions.CultureInvariant)]
+    private static partial Regex FsutilModeRegex();
+
+    public NtfsLastAccessTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
+
     public override TweakStatusInfo GetStatus()
     {
         var raw = RegistryHelper.ReadDword(RegistryHelper.Hklm, FileSystemKey, "NtfsDisableLastAccessUpdate");
-        int mode;
-        if (raw.HasValue)
-        {
-            // Low 2 bits encode the fsutil mode: 0=User Enabled, 1=User Disabled, 2=System Disabled, 3=System Enabled
-            mode = raw.Value & 0x3;
-        }
-        else
-        {
-            mode = QueryFsutilMode() ?? 3;
-        }
+        int mode = raw.HasValue ? (raw.Value & 0x3) : (QueryFsutilMode() ?? 3);
 
-        // Mode 1 (User Managed, Disabled) or 2 (System Managed, Disabled) means Last Access updates are OFF
         var isDisabled = mode is 1 or 2;
         var modeText = mode switch
         {
@@ -83,11 +78,13 @@ public sealed class NtfsLastAccessTweak : TweakBase
     protected override TweakOperationResult RevertCore()
     {
         var entry = Backup.GetTweakBackup(Descriptor.Id);
-        var restoreMode = 3; // System Managed, Enabled (Windows default on <128GB or modern builds)
-        if (entry is not null && entry.Metadata.TryGetValue("OriginalMode", out var origStr) && int.TryParse(origStr, out var parsed))
+        var restoreMode = 3;
+        if (entry is not null)
         {
-            // If the original was already 2 (System Disabled), switching OFF should explicitly enable (0 or 3) so toggle reflects OFF!
-            restoreMode = parsed is 0 or 3 ? parsed : 3;
+            if (entry.Metadata.TryGetValue("OriginalMode", out var origStr) && int.TryParse(origStr, out var parsed))
+            {
+                restoreMode = parsed is 0 or 3 ? parsed : 3;
+            }
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
 
@@ -104,7 +101,7 @@ public sealed class NtfsLastAccessTweak : TweakBase
     {
         var res = CommandRunner.Run("fsutil", "behavior query disablelastaccess", 6000);
         if (!res.Success) return null;
-        var match = Regex.Match(res.StandardOutput, @"=\s*([0-3])");
+        var match = FsutilModeRegex().Match(res.StandardOutput);
         return match.Success && int.TryParse(match.Groups[1].Value, out var val) ? val : null;
     }
 }

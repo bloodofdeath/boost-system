@@ -6,7 +6,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 2. Отключить энергосбережение сети
+/// 8. Отключить энергосбережение сети
 /// </summary>
 public sealed class NetworkPowerSavingTweak : TweakBase
 {
@@ -14,9 +14,7 @@ public sealed class NetworkPowerSavingTweak : TweakBase
     private const string WirelessSubgroup = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
     private const string WirelessPowerSetting = "12bbebe6-58d6-4636-95bb-3217ef867c1a";
 
-    public NetworkPowerSavingTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_network_power_saving",
         Title = "Отключить энергосбережение сети",
@@ -29,6 +27,10 @@ public sealed class NetworkPowerSavingTweak : TweakBase
         NoticeTooltip = "При применении сетевой адаптер может кратковременно переподключиться (1–3 секунды).",
         RequiresAdmin = true
     };
+
+    public NetworkPowerSavingTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -61,6 +63,15 @@ public sealed class NetworkPowerSavingTweak : TweakBase
     protected override TweakOperationResult ApplyCore()
     {
         var entry = Backup.GetOrCreateTweakBackup(Descriptor.Id);
+        if (!entry.Metadata.ContainsKey("OriginalWirelessAc"))
+        {
+            var origWireless = PowerCfgHelper.QueryAcValueIndex(WirelessSubgroup, WirelessPowerSetting);
+            if (origWireless.HasValue)
+            {
+                entry.Metadata["OriginalWirelessAc"] = origWireless.Value.ToString();
+            }
+        }
+
         var physicalSubKeys = FindPhysicalAdapterSubKeys(preferActiveOnly: false);
 
         foreach (var subKey in physicalSubKeys)
@@ -77,10 +88,9 @@ public sealed class NetworkPowerSavingTweak : TweakBase
         }
 
         // Wireless Adapter Power Saving Mode -> 0 (Maximum Performance) on AC
-        CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {WirelessSubgroup} {WirelessPowerSetting} 0", 8000);
-        CommandRunner.Run("powercfg", "/setactive scheme_current", 8000);
+        PowerCfgHelper.SetAcValueIndex(WirelessSubgroup, WirelessPowerSetting, 0);
+        PowerCfgHelper.ApplyCurrentScheme();
 
-        // Apply live via PowerShell Disable-NetAdapterPowerManagement on active physical adapters (best effort)
         CommandRunner.RunPowerShell(@"
             Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
                 Disable-NetAdapterPowerManagement -Name $_.Name -NoRestart -ErrorAction SilentlyContinue
@@ -93,17 +103,35 @@ public sealed class NetworkPowerSavingTweak : TweakBase
     protected override TweakOperationResult RevertCore()
     {
         var entry = Backup.GetTweakBackup(Descriptor.Id);
-        if (entry is not null && entry.RegistryValues.Count > 0)
+        int restoreWirelessAc = 0;
+        bool hasSavedWireless = false;
+
+        if (entry is not null)
         {
-            RestoreBackedUpRegistryValues(entry);
+            if (entry.Metadata.TryGetValue("OriginalWirelessAc", out var wStr) && int.TryParse(wStr, out var parsedW))
+            {
+                restoreWirelessAc = parsedW;
+                hasSavedWireless = true;
+            }
+            if (entry.RegistryValues.Count > 0)
+            {
+                RestoreBackedUpRegistryValues(entry);
+            }
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
             foreach (var subKey in FindPhysicalAdapterSubKeys(preferActiveOnly: false))
             {
                 RegistryHelper.WriteValue(RegistryHelper.Hklm, subKey, "PnPCapabilities", 0, RegistryValueKind.DWord);
             }
+        }
+
+        if (hasSavedWireless)
+        {
+            PowerCfgHelper.SetAcValueIndex(WirelessSubgroup, WirelessPowerSetting, restoreWirelessAc);
+            PowerCfgHelper.ApplyCurrentScheme();
         }
 
         CommandRunner.RunPowerShell(@"

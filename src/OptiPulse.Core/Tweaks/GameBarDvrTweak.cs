@@ -5,7 +5,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 3. Отключить фоновую запись в игровой панели
+/// 9. Отключить фоновую запись в игровой панели
 /// </summary>
 public sealed class GameBarDvrTweak : TweakBase
 {
@@ -13,9 +13,7 @@ public sealed class GameBarDvrTweak : TweakBase
     private const string UserGameDvrKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR";
     private const string PolicyGameDvrKey = @"SOFTWARE\Policies\Microsoft\Windows\GameDVR";
 
-    public GameBarDvrTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_gamebar_dvr",
         Title = "Отключить фоновую запись в игровой панели",
@@ -28,6 +26,10 @@ public sealed class GameBarDvrTweak : TweakBase
         NoticeTooltip = "Встроенная запись клипов через Xbox Game Bar (Win+G) перестанет работать.",
         RequiresAdmin = true
     };
+
+    public GameBarDvrTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -63,7 +65,8 @@ public sealed class GameBarDvrTweak : TweakBase
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        if (GetStatus().IsEnabled)
         {
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, GameConfigStoreKey, "GameDVR_Enabled", 1, RegistryValueKind.DWord);
             RegistryHelper.WriteValue(RegistryHelper.Hkcu, UserGameDvrKey, "AppCaptureEnabled", 1, RegistryValueKind.DWord);

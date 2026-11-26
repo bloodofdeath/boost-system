@@ -5,7 +5,7 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 10. Высокая производительность GPU [Бета]
+/// 2. Высокая производительность GPU [Бета]
 /// </summary>
 public sealed class GpuHighPerformanceTweak : TweakBase
 {
@@ -15,9 +15,7 @@ public sealed class GpuHighPerformanceTweak : TweakBase
     private const string SubPciExpress = "501a4d13-42af-4429-9fd1-a8218c268e20";
     private const string PciLinkStateSetting = "ee12f906-d277-404b-b6da-e5fa1a576df5";
 
-    public GpuHighPerformanceTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "gpu_high_performance",
         Title = "Высокая производительность GPU",
@@ -27,10 +25,13 @@ public sealed class GpuHighPerformanceTweak : TweakBase
         IconKey = "IconGpuPerformance",
         Category = TweakCategory.GpuAndGaming,
         NoticeLevel = TweakNoticeLevel.None,
-        IsBeta = true,
         RequiresAdmin = true,
         RequiresRebootForFullEffect = true
     };
+
+    public GpuHighPerformanceTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {
@@ -51,8 +52,7 @@ public sealed class GpuHighPerformanceTweak : TweakBase
             }
         }
 
-        var hasBackupFlag = Backup.GetTweakBackup(Descriptor.Id) is not null;
-        var enabled = hags == 2 && (hasSwapUpgrade || vendorMaxPerf || hasBackupFlag);
+        var enabled = hags == 2 && (hasSwapUpgrade || vendorMaxPerf);
         return new TweakStatusInfo
         {
             IsEnabled = enabled,
@@ -63,6 +63,14 @@ public sealed class GpuHighPerformanceTweak : TweakBase
     protected override TweakOperationResult ApplyCore()
     {
         var entry = Backup.GetOrCreateTweakBackup(Descriptor.Id);
+        if (!entry.Metadata.ContainsKey("OriginalPciLinkStateAc"))
+        {
+            var origPci = PowerCfgHelper.QueryAcValueIndex(SubPciExpress, PciLinkStateSetting);
+            if (origPci.HasValue)
+            {
+                entry.Metadata["OriginalPciLinkStateAc"] = origPci.Value.ToString();
+            }
+        }
 
         // 1. Hardware-Accelerated GPU Scheduling (HAGS)
         RegistryHelper.BackupAndWrite(entry, RegistryHelper.Hklm, GraphicsDriversKey, "HwSchMode", 2, RegistryValueKind.DWord);
@@ -74,8 +82,8 @@ public sealed class GpuHighPerformanceTweak : TweakBase
         RegistryHelper.BackupAndWrite(entry, RegistryHelper.Hkcu, UserGpuPrefsKey, "DirectXUserGlobalSettings", updatedGlobal, RegistryValueKind.String);
 
         // 3. Disable PCIe Link State Power Management (AC)
-        CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubPciExpress} {PciLinkStateSetting} 0", 8000);
-        CommandRunner.Run("powercfg", "/setactive scheme_current", 8000);
+        PowerCfgHelper.SetAcValueIndex(SubPciExpress, PciLinkStateSetting, 0);
+        PowerCfgHelper.ApplyCurrentScheme();
 
         // 4. Vendor-specific GPU driver power preferences
         int vendorTweakCount = 0;
@@ -114,31 +122,75 @@ public sealed class GpuHighPerformanceTweak : TweakBase
     protected override TweakOperationResult RevertCore()
     {
         var entry = Backup.GetTweakBackup(Descriptor.Id);
-        if (entry is not null && entry.RegistryValues.Count > 0)
+        int restorePciAc = 1;
+
+        if (entry is not null)
         {
+            if (entry.Metadata.TryGetValue("OriginalPciLinkStateAc", out var pciStr) && int.TryParse(pciStr, out var parsedPci))
+            {
+                restorePciAc = parsedPci;
+            }
             RestoreBackedUpRegistryValues(entry);
             Backup.RemoveTweakBackup(Descriptor.Id);
         }
-        else
+
+        // Guarantee clean revert even if settings were previously applied externally before OptiPulse ran
+        if (GetStatus().IsEnabled)
         {
-            RegistryHelper.WriteValue(RegistryHelper.Hklm, GraphicsDriversKey, "HwSchMode", 1, RegistryValueKind.DWord);
+            var currentGlobal = RegistryHelper.ReadString(RegistryHelper.Hkcu, UserGpuPrefsKey, "DirectXUserGlobalSettings") ?? string.Empty;
+            var resetGlobal = RemoveDirectXSetting(currentGlobal, "SwapEffectUpgradeEnable");
+            resetGlobal = RemoveDirectXSetting(resetGlobal, "VRROptimizeEnable");
+            if (string.IsNullOrWhiteSpace(resetGlobal))
+            {
+                RegistryHelper.DeleteValue(RegistryHelper.Hkcu, UserGpuPrefsKey, "DirectXUserGlobalSettings");
+            }
+            else
+            {
+                RegistryHelper.WriteValue(RegistryHelper.Hkcu, UserGpuPrefsKey, "DirectXUserGlobalSettings", resetGlobal, RegistryValueKind.String);
+            }
+
+            foreach (var sub in RegistryHelper.EnumerateSubKeyNames(RegistryHelper.Hklm, DisplayClassKey))
+            {
+                if (sub.Length != 4 || !int.TryParse(sub, out _)) continue;
+                var fullKey = $@"{DisplayClassKey}\{sub}";
+                RegistryHelper.DeleteValue(RegistryHelper.Hklm, fullKey, "PowerMizerEnable");
+                RegistryHelper.DeleteValue(RegistryHelper.Hklm, fullKey, "PowerMizerLevel");
+                RegistryHelper.DeleteValue(RegistryHelper.Hklm, fullKey, "PowerMizerLevelAC");
+                if (RegistryHelper.ReadDword(RegistryHelper.Hklm, fullKey, "EnableUlps") == 0)
+                {
+                    RegistryHelper.WriteValue(RegistryHelper.Hklm, fullKey, "EnableUlps", 1, RegistryValueKind.DWord);
+                }
+            }
         }
 
-        // Restore PCIe Link State Power Management to Moderate power savings (1)
-        CommandRunner.Run("powercfg", $"/setacvalueindex scheme_current {SubPciExpress} {PciLinkStateSetting} 1", 8000);
-        CommandRunner.Run("powercfg", "/setactive scheme_current", 8000);
+        PowerCfgHelper.SetAcValueIndex(SubPciExpress, PciLinkStateSetting, restorePciAc);
+        PowerCfgHelper.ApplyCurrentScheme();
 
         return TweakOperationResult.Ok(false, "Настройки производительности GPU восстановлены. Рекомендуется перезагрузка.", rebootRecommended: true);
     }
 
     private static string UpsertDirectXSetting(string existing, string key, string value)
     {
-        var pairs = existing.Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(p => p.Split('=', 2))
-            .Where(parts => parts.Length == 2)
-            .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
-
+        var pairs = ParseDirectXSettings(existing);
         pairs[key] = value;
-        return string.Join(";", pairs.Select(kv => $"{kv.Key}={kv.Value}")) + ";";
+        return FormatDirectXSettings(pairs);
     }
+
+    private static string RemoveDirectXSetting(string existing, string key)
+    {
+        var pairs = ParseDirectXSettings(existing);
+        pairs.Remove(key);
+        return FormatDirectXSettings(pairs);
+    }
+
+    private static Dictionary<string, string> ParseDirectXSettings(string raw) =>
+        raw.Split(';', StringSplitOptions.RemoveEmptyEntries)
+           .Select(p => p.Split('=', 2))
+           .Where(parts => parts.Length == 2)
+           .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+
+    private static string FormatDirectXSettings(Dictionary<string, string> pairs) =>
+        pairs.Count == 0
+            ? string.Empty
+            : string.Join(";", pairs.Select(kv => $"{kv.Key}={kv.Value}")) + ";";
 }

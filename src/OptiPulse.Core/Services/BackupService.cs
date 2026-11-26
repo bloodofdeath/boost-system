@@ -38,16 +38,17 @@ public sealed class BackupService
         return path;
     }
 
+    /// <summary>
+    /// Returns a working copy of an existing backup entry (if previously persisted) or a fresh entry.
+    /// Does not mutate the persisted store until <see cref="SaveTweakBackup"/> is called.
+    /// </summary>
     public TweakBackupEntry GetOrCreateTweakBackup(string tweakId)
     {
         lock (_sync)
         {
-            if (!_store.Tweaks.TryGetValue(tweakId, out var entry))
-            {
-                entry = new TweakBackupEntry { TweakId = tweakId, SavedAtUtc = DateTime.UtcNow };
-                _store.Tweaks[tweakId] = entry;
-            }
-            return entry;
+            return _store.Tweaks.TryGetValue(tweakId, out var existing)
+                ? existing.Clone()
+                : new TweakBackupEntry { TweakId = tweakId, SavedAtUtc = DateTime.UtcNow };
         }
     }
 
@@ -55,16 +56,18 @@ public sealed class BackupService
     {
         lock (_sync)
         {
-            return _store.Tweaks.TryGetValue(tweakId, out var entry) ? entry : null;
+            return _store.Tweaks.TryGetValue(tweakId, out var entry) ? entry.Clone() : null;
         }
     }
 
     public void SaveTweakBackup(TweakBackupEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
         lock (_sync)
         {
-            entry.SavedAtUtc = DateTime.UtcNow;
-            _store.Tweaks[entry.TweakId] = entry;
+            var copy = entry.Clone();
+            copy.SavedAtUtc = DateTime.UtcNow;
+            _store.Tweaks[copy.TweakId] = copy;
             PersistInternal();
         }
     }
@@ -82,11 +85,14 @@ public sealed class BackupService
 
     public void SaveDisabledService(ServiceBackup backup)
     {
+        ArgumentNullException.ThrowIfNull(backup);
         lock (_sync)
         {
             if (!_store.DisabledServices.ContainsKey(backup.ServiceName))
             {
-                _store.DisabledServices[backup.ServiceName] = backup;
+                var copy = backup.Clone();
+                copy.SavedAtUtc = DateTime.UtcNow;
+                _store.DisabledServices[copy.ServiceName] = copy;
                 PersistInternal();
             }
         }
@@ -96,7 +102,7 @@ public sealed class BackupService
     {
         lock (_sync)
         {
-            return _store.DisabledServices.TryGetValue(serviceName, out var b) ? b : null;
+            return _store.DisabledServices.TryGetValue(serviceName, out var b) ? b.Clone() : null;
         }
     }
 
@@ -113,9 +119,10 @@ public sealed class BackupService
 
     public void SaveDisabledStartupItem(StartupItemBackup backup)
     {
+        ArgumentNullException.ThrowIfNull(backup);
         lock (_sync)
         {
-            _store.DisabledStartupItems[backup.Id] = backup;
+            _store.DisabledStartupItems[backup.Id] = backup.Clone();
             PersistInternal();
         }
     }
@@ -124,7 +131,7 @@ public sealed class BackupService
     {
         lock (_sync)
         {
-            return _store.DisabledStartupItems.TryGetValue(id, out var b) ? b : null;
+            return _store.DisabledStartupItems.TryGetValue(id, out var b) ? b.Clone() : null;
         }
     }
 
@@ -143,8 +150,15 @@ public sealed class BackupService
     {
         lock (_sync)
         {
-            var json = JsonSerializer.Serialize(_store, JsonOptions);
-            return JsonSerializer.Deserialize<BackupStore>(json, JsonOptions) ?? new BackupStore();
+            var snap = new BackupStore
+            {
+                SchemaVersion = _store.SchemaVersion,
+                LastUpdatedUtc = _store.LastUpdatedUtc
+            };
+            foreach (var kv in _store.Tweaks) snap.Tweaks[kv.Key] = kv.Value.Clone();
+            foreach (var kv in _store.DisabledServices) snap.DisabledServices[kv.Key] = kv.Value.Clone();
+            foreach (var kv in _store.DisabledStartupItems) snap.DisabledStartupItems[kv.Key] = kv.Value.Clone();
+            return snap;
         }
     }
 
@@ -173,6 +187,16 @@ public sealed class BackupService
         }
         catch
         {
+            try
+            {
+                var corruptBackup = _storePath + $".corrupt_{DateTime.UtcNow:yyyyMMddHHmmss}.bak";
+                if (File.Exists(_storePath)) File.Copy(_storePath, corruptBackup, overwrite: true);
+            }
+            catch
+            {
+                // Ignore secondary failure
+            }
+
             return new BackupStore();
         }
     }

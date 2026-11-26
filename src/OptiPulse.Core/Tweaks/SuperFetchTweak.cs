@@ -4,15 +4,13 @@ using OptiPulse.Core.Services;
 namespace OptiPulse.Core.Tweaks;
 
 /// <summary>
-/// 6. Отключить SuperFetch (служба SysMain)
+/// 12. Отключить SuperFetch (служба SysMain)
 /// </summary>
 public sealed class SuperFetchTweak : TweakBase
 {
     private const string ServiceName = "SysMain";
 
-    public SuperFetchTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
-
-    public override TweakDescriptor Descriptor => new()
+    private static readonly TweakDescriptor Info = new()
     {
         Id = "disable_superfetch",
         Title = "Отключить SuperFetch",
@@ -24,6 +22,10 @@ public sealed class SuperFetchTweak : TweakBase
         NoticeLevel = TweakNoticeLevel.None,
         RequiresAdmin = true
     };
+
+    public SuperFetchTweak(BackupService backup, AppLogger logger) : base(backup, logger) { }
+
+    public override TweakDescriptor Descriptor => Info;
 
     public override TweakStatusInfo GetStatus()
     {

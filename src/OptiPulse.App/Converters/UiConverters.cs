@@ -6,6 +6,23 @@ using OptiPulse.Core.Models;
 
 namespace OptiPulse.App.Converters;
 
+internal static class BrushFactory
+{
+    public static SolidColorBrush Rgb(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    public static SolidColorBrush Argb(byte a, byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+}
+
 public sealed class BoolToVisibilityConverter : IValueConverter
 {
     public bool Invert { get; set; }
@@ -66,10 +83,31 @@ public sealed class IntEqualsToBoolConverter : IValueConverter
     }
 }
 
+public sealed class StringEqualsToBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is string s && parameter is string p)
+        {
+            return s.Equals(p, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is bool b && b && parameter is string p)
+        {
+            return p;
+        }
+        return Binding.DoNothing;
+    }
+}
+
 public sealed class NoticeLevelToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush WarningBrush = new(Color.FromRgb(0xF5, 0x9E, 0x0B));
-    private static readonly SolidColorBrush InfoBrush = new(Color.FromRgb(0x4F, 0x7C, 0xFF));
+    private static readonly SolidColorBrush WarningBrush = BrushFactory.Rgb(0xF5, 0x9E, 0x0B);
+    private static readonly SolidColorBrush InfoBrush = BrushFactory.Rgb(0x4F, 0x7C, 0xFF);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is TweakNoticeLevel level ? level switch
@@ -124,9 +162,9 @@ public sealed class ImpactToTextConverter : IValueConverter
 
 public sealed class ImpactToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush HighBg = new(Color.FromArgb(0x2A, 0xEF, 0x44, 0x44));
-    private static readonly SolidColorBrush MedBg = new(Color.FromArgb(0x2A, 0xF5, 0x9E, 0x0B));
-    private static readonly SolidColorBrush LowBg = new(Color.FromArgb(0x2A, 0x4F, 0x7C, 0xFF));
+    private static readonly SolidColorBrush HighBg = BrushFactory.Argb(0x2A, 0xEF, 0x44, 0x44);
+    private static readonly SolidColorBrush MedBg = BrushFactory.Argb(0x2A, 0xF5, 0x9E, 0x0B);
+    private static readonly SolidColorBrush LowBg = BrushFactory.Argb(0x2A, 0x4F, 0x7C, 0xFF);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is RecommendationImpact impact ? impact switch
@@ -141,9 +179,9 @@ public sealed class ImpactToBrushConverter : IValueConverter
 
 public sealed class ImpactToForegroundConverter : IValueConverter
 {
-    private static readonly SolidColorBrush HighFg = new(Color.FromRgb(0xFC, 0xA5, 0xA5));
-    private static readonly SolidColorBrush MedFg = new(Color.FromRgb(0xFC, 0xD3, 0x4D));
-    private static readonly SolidColorBrush LowFg = new(Color.FromRgb(0x93, 0xC5, 0xFD));
+    private static readonly SolidColorBrush HighFg = BrushFactory.Rgb(0xFC, 0xA5, 0xA5);
+    private static readonly SolidColorBrush MedFg = BrushFactory.Rgb(0xFC, 0xD3, 0x4D);
+    private static readonly SolidColorBrush LowFg = BrushFactory.Rgb(0x93, 0xC5, 0xFD);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is RecommendationImpact impact ? impact switch
@@ -171,9 +209,9 @@ public sealed class SafetyToTextConverter : IValueConverter
 
 public sealed class SafetyToForegroundConverter : IValueConverter
 {
-    private static readonly SolidColorBrush SafeFg = new(Color.FromRgb(0x34, 0xE5, 0x9E));
-    private static readonly SolidColorBrush ModFg = new(Color.FromRgb(0xFB, 0xBF, 0x24));
-    private static readonly SolidColorBrush CautFg = new(Color.FromRgb(0xF8, 0x71, 0x71));
+    private static readonly SolidColorBrush SafeFg = BrushFactory.Rgb(0x34, 0xE5, 0x9E);
+    private static readonly SolidColorBrush ModFg = BrushFactory.Rgb(0xFB, 0xBF, 0x24);
+    private static readonly SolidColorBrush CautFg = BrushFactory.Rgb(0xF8, 0x71, 0x71);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is RecommendationSafety safety ? safety switch
@@ -188,10 +226,10 @@ public sealed class SafetyToForegroundConverter : IValueConverter
 
 public sealed class LogLevelToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush InfoBrush = new(Color.FromRgb(0x93, 0xC5, 0xFD));
-    private static readonly SolidColorBrush SuccessBrush = new(Color.FromRgb(0x34, 0xE5, 0x9E));
-    private static readonly SolidColorBrush WarnBrush = new(Color.FromRgb(0xFB, 0xBF, 0x24));
-    private static readonly SolidColorBrush ErrBrush = new(Color.FromRgb(0xF8, 0x71, 0x71));
+    private static readonly SolidColorBrush InfoBrush = BrushFactory.Rgb(0x93, 0xC5, 0xFD);
+    private static readonly SolidColorBrush SuccessBrush = BrushFactory.Rgb(0x34, 0xE5, 0x9E);
+    private static readonly SolidColorBrush WarnBrush = BrushFactory.Rgb(0xFB, 0xBF, 0x24);
+    private static readonly SolidColorBrush ErrBrush = BrushFactory.Rgb(0xF8, 0x71, 0x71);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is LogLevel level ? level switch
@@ -207,9 +245,9 @@ public sealed class LogLevelToBrushConverter : IValueConverter
 
 public sealed class ScoreToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush Good = new(Color.FromRgb(0x34, 0xE5, 0x9E));
-    private static readonly SolidColorBrush Mid = new(Color.FromRgb(0xF5, 0x9E, 0x0B));
-    private static readonly SolidColorBrush Low = new(Color.FromRgb(0xEF, 0x44, 0x44));
+    private static readonly SolidColorBrush Good = BrushFactory.Rgb(0x34, 0xE5, 0x9E);
+    private static readonly SolidColorBrush Mid = BrushFactory.Rgb(0xF5, 0x9E, 0x0B);
+    private static readonly SolidColorBrush Low = BrushFactory.Rgb(0xEF, 0x44, 0x44);
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {

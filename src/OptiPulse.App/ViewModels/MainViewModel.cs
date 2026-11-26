@@ -9,14 +9,14 @@ using OptiPulse.Core.Services;
 
 namespace OptiPulse.App.ViewModels;
 
-public sealed class MainViewModel : ViewModelBase
+public sealed class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly BackupService _backup;
     private readonly AppLogger _logger;
     private readonly TweakRegistry _registry;
     private readonly PcAnalyzerService _analyzer;
 
-    private int _selectedMainTab; // 0=Optimizations, 1=Analyzer, 2=Backups, 3=Logs
+    private int _selectedMainTab;      // 0=Optimizations, 1=Analyzer, 2=Backups, 3=Logs
     private int _selectedReportSubTab; // 0=Recommendations, 1=Startup, 2=Processes, 3=AlreadyOptimized
     private string _selectedCategoryFilter = "ALL";
     private string _selectedReportCategoryFilter = "ALL";
@@ -177,6 +177,7 @@ public sealed class MainViewModel : ViewModelBase
 
     public int ActiveTweaksCount => AllTweaks.Count(t => t.IsEnabled);
     public int TotalTweaksCount => AllTweaks.Count;
+    public string AllFilterLabel => $"Все ({TotalTweaksCount})";
     public string ActiveCounterText => IsScanningStatuses
         ? "Проверка системы..."
         : $"Включено: {ActiveTweaksCount} / {TotalTweaksCount}";
@@ -261,11 +262,13 @@ public sealed class MainViewModel : ViewModelBase
             });
         };
 
+        var cardByTweakId = new Dictionary<string, TweakCardViewModel>(StringComparer.OrdinalIgnoreCase);
         foreach (var tweak in _registry.All)
         {
             var vm = new TweakCardViewModel(tweak, card => ShowNotRecommendedModal?.Invoke(card));
             vm.ToggleRequested += OnCardToggleRequested;
             AllTweaks.Add(vm);
+            cardByTweakId[vm.Id] = vm;
         }
 
         SelectTabCommand = new RelayCommand(p =>
@@ -296,14 +299,14 @@ public sealed class MainViewModel : ViewModelBase
                 $"--tab {SelectedMainTab}");
         });
 
-        RunPcAnalysisCommand = new AsyncRelayCommand(RunPcAnalysisAsync);
-        RefreshStatusesCommand = new AsyncRelayCommand(() => RefreshAllStatusesAsync(isInitialStartup: false));
-        ApplyGamingPresetCommand = new AsyncRelayCommand(ApplyGamingPresetAsync);
-        RevertAllCommand = new AsyncRelayCommand(RevertAllAsync);
-        CreateRestorePointCommand = new AsyncRelayCommand(CreateRestorePointAsync);
+        RunPcAnalysisCommand = new AsyncRelayCommand(RunPcAnalysisAsync, onError: HandleCommandError);
+        RefreshStatusesCommand = new AsyncRelayCommand(() => RefreshAllStatusesAsync(isInitialStartup: false), onError: HandleCommandError);
+        ApplyGamingPresetCommand = new AsyncRelayCommand(ApplyGamingPresetAsync, onError: HandleCommandError);
+        RevertAllCommand = new AsyncRelayCommand(RevertAllAsync, onError: HandleCommandError);
+        CreateRestorePointCommand = new AsyncRelayCommand(CreateRestorePointAsync, onError: HandleCommandError);
         ExportReportCommand = new RelayCommand(ExportReport, () => HasReport);
         CopyMarkdownReportCommand = new RelayCommand(CopyMarkdownReport, () => HasReport);
-        ApplySafeRecommendationsCommand = new AsyncRelayCommand(ApplySafeRecommendationsAsync, () => HasReport);
+        ApplySafeRecommendationsCommand = new AsyncRelayCommand(ApplySafeRecommendationsAsync, () => HasReport, HandleCommandError);
         OpenBackupFolderCommand = new RelayCommand(() => OpenFolder(_backup.BackupDirectory));
         OpenLogsFolderCommand = new RelayCommand(() => OpenFolder(_logger.LogDirectory));
         ClearLogsCommand = new RelayCommand(() => { _logger.ClearInMemory(); LogEntries.Clear(); });
@@ -313,58 +316,59 @@ public sealed class MainViewModel : ViewModelBase
         ApplyTweakFilter();
     }
 
+    private void HandleCommandError(Exception ex)
+    {
+        _logger.Error("UI", $"Необработанная ошибка команды: {ex.Message}");
+        ShowToast($"Ошибка: {ex.Message}", isError: true);
+    }
+
     public async Task InitializeAsync(string[] args)
     {
-        // Automatically verify all 14 real Windows states immediately on startup
+        var cli = CliOptions.Parse(args);
+        if (cli.InitialTab.HasValue)
+        {
+            SelectedMainTab = cli.InitialTab.Value;
+        }
+
+        // Verify all 14 real Windows states in parallel on startup
         await RefreshAllStatusesAsync(isInitialStartup: true);
         RefreshBackupList();
 
-        // Handle post-UAC pending arguments (e.g., --tab 1 --apply-tweak disable_superfetch)
-        string? pendingTweakId = null;
-        bool pendingEnable = true;
-        bool pendingAnalyze = false;
-        bool pendingGamingPreset = false;
-
-        for (int i = 0; i < args.Length; i++)
+        if (!string.IsNullOrWhiteSpace(cli.DisableServiceName) && IsAdministrator)
         {
-            switch (args[i].ToLowerInvariant())
-            {
-                case "--tab" when i + 1 < args.Length && int.TryParse(args[i + 1], out var tab):
-                    SelectedMainTab = tab;
-                    i++;
-                    break;
-                case "--apply-tweak" when i + 1 < args.Length:
-                    pendingTweakId = args[++i];
-                    pendingEnable = true;
-                    break;
-                case "--revert-tweak" when i + 1 < args.Length:
-                    pendingTweakId = args[++i];
-                    pendingEnable = false;
-                    break;
-                case "--analyze":
-                    pendingAnalyze = true;
-                    break;
-                case "--gaming-preset":
-                    pendingGamingPreset = true;
-                    break;
-            }
+            var (ok, msg, _) = await Task.Run(() => _analyzer.DisableOptionalService(cli.DisableServiceName));
+            ShowToast(msg, isError: !ok);
+            RefreshBackupList();
         }
 
-        if (!string.IsNullOrWhiteSpace(pendingTweakId))
+        if (!string.IsNullOrWhiteSpace(cli.PendingTweakId))
         {
-            var card = AllTweaks.FirstOrDefault(t => t.Id.Equals(pendingTweakId, StringComparison.OrdinalIgnoreCase));
+            var card = AllTweaks.FirstOrDefault(t => t.Id.Equals(cli.PendingTweakId, StringComparison.OrdinalIgnoreCase));
             if (card is not null)
             {
-                await ExecuteCardToggleAsync(card, pendingEnable);
+                await ExecuteCardToggleAsync(card, cli.PendingTweakEnable);
             }
         }
-        else if (pendingGamingPreset)
+        else if (cli.ApplyGamingPreset)
         {
             await ApplyGamingPresetAsync();
         }
-        else if (pendingAnalyze)
+        else if (cli.RevertAll)
+        {
+            await RevertAllAsync();
+        }
+        else if (cli.CreateRestorePoint)
+        {
+            await CreateRestorePointAsync();
+        }
+
+        if (cli.RunAnalysis)
         {
             await RunPcAnalysisAsync();
+            if (cli.ApplySafeRecommendations && HasReport)
+            {
+                await ApplySafeRecommendationsAsync();
+            }
         }
     }
 
@@ -373,14 +377,17 @@ public sealed class MainViewModel : ViewModelBase
         IsScanningStatuses = true;
         try
         {
-            var states = await Task.Run(() =>
-                AllTweaks.Select(vm => (vm, vm.Tweak.GetStatus())).ToList());
+            var states = await Task.Run(() => _registry.QueryAllStatusesParallel());
+            var byId = states.ToDictionary(x => x.Tweak.Descriptor.Id, x => x.Status, StringComparer.OrdinalIgnoreCase);
 
             var enabledNames = new List<string>();
-            foreach (var (vm, status) in states)
+            foreach (var vm in AllTweaks)
             {
-                vm.SetStateSilently(status.IsEnabled, status.StatusNote, status.IsSupported);
-                if (status.IsEnabled) enabledNames.Add(vm.Title);
+                if (byId.TryGetValue(vm.Id, out var status))
+                {
+                    vm.SetStateSilently(status.IsEnabled, status.StatusNote, status.IsSupported);
+                    if (status.IsEnabled) enabledNames.Add(vm.Title);
+                }
             }
 
             RaisePropertyChanged(nameof(ActiveTweaksCount));
@@ -415,11 +422,13 @@ public sealed class MainViewModel : ViewModelBase
         if (card.RequiresAdmin && !IsAdministrator)
         {
             card.SetStateSilently(!targetState, card.StatusNote, card.IsSupported);
-            var actionArg = targetState ? $"--apply-tweak {card.Id}" : $"--revert-tweak {card.Id}";
+            var actionArg = targetState
+                ? $"--apply-tweak {CliOptions.QuoteArg(card.Id)}"
+                : $"--revert-tweak {CliOptions.QuoteArg(card.Id)}";
             ElevateWithConfirmation(
                 $"Требуются права администратора — {card.Title}",
                 $"Для {(targetState ? "включения" : "отключения")} функции «{card.Title}» необходимо изменить системные параметры Windows.\n\nПосле подтверждения UAC приложение перезапустится от имени администратора и автоматически применит выбранную настройку.",
-                $"--tab 0 {actionArg}");
+                $"--tab {SelectedMainTab} {actionArg}");
             return;
         }
 
@@ -432,8 +441,10 @@ public sealed class MainViewModel : ViewModelBase
 
             if (result.RequiresAdmin)
             {
-                var actionArg = targetState ? $"--apply-tweak {card.Id}" : $"--revert-tweak {card.Id}";
-                ElevateWithConfirmation($"Требуются права администратора — {card.Title}", result.Message, $"--tab 0 {actionArg}");
+                var actionArg = targetState
+                    ? $"--apply-tweak {CliOptions.QuoteArg(card.Id)}"
+                    : $"--revert-tweak {CliOptions.QuoteArg(card.Id)}";
+                ElevateWithConfirmation($"Требуются права администратора — {card.Title}", result.Message, $"--tab {SelectedMainTab} {actionArg}");
             }
             else
             {
@@ -449,6 +460,7 @@ public sealed class MainViewModel : ViewModelBase
             card.IsBusy = false;
             RaisePropertyChanged(nameof(ActiveTweaksCount));
             RaisePropertyChanged(nameof(ActiveCounterText));
+            ApplyTweakFilter();
             RefreshBackupList();
         }
     }
@@ -465,7 +477,7 @@ public sealed class MainViewModel : ViewModelBase
             var report = await _analyzer.AnalyzeAsync(progress);
             CurrentReport = report;
 
-            // Keep main 14 cards in sync with the fresh scan too
+            // Keep main 14 cards in sync with the fresh scan
             await RefreshAllStatusesAsync(isInitialStartup: true);
 
             AllReportRecommendations.Clear();
@@ -516,10 +528,17 @@ public sealed class MainViewModel : ViewModelBase
     {
         if (rec.RequiresAdmin && !IsAdministrator)
         {
+            var postUacArgs = rec.ActionType switch
+            {
+                RecommendationActionType.EnableTweak => $"--tab 1 --apply-tweak {CliOptions.QuoteArg(rec.ActionTarget)} --analyze",
+                RecommendationActionType.DisableService => $"--tab 1 --disable-service {CliOptions.QuoteArg(rec.ActionTarget)} --analyze",
+                _ => "--tab 1 --analyze"
+            };
+
             ElevateWithConfirmation(
                 "Требуются права администратора",
                 $"Для выполнения рекомендации «{rec.Title}» необходимы права администратора Windows.",
-                "--tab 1 --analyze");
+                postUacArgs);
             return;
         }
 
@@ -581,6 +600,7 @@ public sealed class MainViewModel : ViewModelBase
                 UpdateLiveReportScoreAfterAction(rec.Title);
                 RaisePropertyChanged(nameof(ActiveTweaksCount));
                 RaisePropertyChanged(nameof(ActiveCounterText));
+                ApplyTweakFilter();
                 RefreshBackupList();
             }
 
@@ -617,7 +637,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             ElevateWithConfirmation(
                 "Требуются права администратора",
-                $"Элемент автозагрузки «{item.Name}» находится в общесистемном разделе HKLM. Для его отключения нужны права администратора.",
+                $"Элемент автозагрузки «{item.Name}» находится в общесистемном разделе. Для его отключения нужны права администратора.",
                 "--tab 1 --analyze");
             return;
         }
@@ -669,8 +689,8 @@ public sealed class MainViewModel : ViewModelBase
         {
             ElevateWithConfirmation(
                 "Требуются права администратора",
-                $"Найдено {safeActionable.Count} безопасных рекомендаций, часть из которых требует прав администратора Windows.",
-                "--tab 1 --analyze");
+                $"Найдено {safeActionable.Count} безопасных рекомендаций, часть из которых требует прав администратора Windows.\n\nПосле подтверждения UAC они будут применены автоматически.",
+                "--tab 1 --apply-safe");
             return;
         }
 
@@ -745,8 +765,8 @@ public sealed class MainViewModel : ViewModelBase
         {
             ElevateWithConfirmation(
                 "Откат изменений — требуются права администратора",
-                "Для полного восстановления системных служб и параметров реестра HKLM требуются права администратора.",
-                "--tab 2");
+                "Для полного восстановления системных служб и параметров реестра HKLM требуются права администратора.\n\nПосле подтверждения UAC откат выполнится автоматически.",
+                "--tab 2 --revert-all");
             return;
         }
 
@@ -772,8 +792,8 @@ public sealed class MainViewModel : ViewModelBase
         {
             ElevateWithConfirmation(
                 "Создание точки восстановления Windows",
-                "Для создания системной точки восстановления Windows требуются права администратора.",
-                "--tab 2");
+                "Для создания системной точки восстановления Windows требуются права администратора.\n\nПосле подтверждения UAC точка восстановления будет создана автоматически.",
+                "--tab 2 --restore-point");
             return;
         }
 
@@ -846,11 +866,15 @@ public sealed class MainViewModel : ViewModelBase
         foreach (var kv in snapshot.Tweaks.OrderByDescending(x => x.Value.SavedAtUtc))
         {
             var tweak = _registry.FindById(kv.Key);
-            var title = tweak?.Descriptor.Title ?? kv.Key;
+            var isQuick = tweak is null && QuickSettingsService.IsQuickSettingBackupKey(kv.Key);
+            var title = tweak?.Descriptor.Title
+                ?? (isQuick ? QuickSettingsService.GetDisplayTitle(kv.Key) : kv.Key);
+            var kindLabel = isQuick ? "Быстрая настройка" : "Оптимизация";
             var details = $"Ключей реестра: {kv.Value.RegistryValues.Count}, служб: {kv.Value.Services.Count}, доп. параметров: {kv.Value.Metadata.Count}";
+
             BackupItems.Add(new BackupDisplayItem
             {
-                Kind = "Оптимизация",
+                Kind = kindLabel,
                 Key = kv.Key,
                 Title = title,
                 Details = details,
@@ -859,21 +883,24 @@ public sealed class MainViewModel : ViewModelBase
                 {
                     if (tweak is not null)
                     {
-                        var card = AllTweaks.FirstOrDefault(c => c.Id == tweak.Descriptor.Id);
+                        var card = AllTweaks.FirstOrDefault(c => c.Id.Equals(tweak.Descriptor.Id, StringComparison.OrdinalIgnoreCase));
                         if (card is not null) await ExecuteCardToggleAsync(card, false);
+                        return;
                     }
-                    else
+
+                    var (ok, msg, needsAdmin) = await Task.Run(() => QuickSettingsService.Revert(kv.Key, _backup, _logger));
+                    if (needsAdmin)
                     {
-                        foreach (var reg in kv.Value.RegistryValues) RegistryHelper.RestoreBackup(reg);
-                        _backup.RemoveTweakBackup(kv.Key);
-                        RefreshBackupList();
-                        ShowToast($"Восстановлено: {title}");
+                        ElevateWithConfirmation("Права администратора", msg, "--tab 2");
+                        return;
                     }
-                })
+                    RefreshBackupList();
+                    ShowToast(msg, isError: !ok);
+                }, onError: HandleCommandError)
             });
         }
 
-        foreach (var svc in snapshot.DisabledServices.Values)
+        foreach (var svc in snapshot.DisabledServices.Values.OrderByDescending(x => x.SavedAtUtc))
         {
             BackupItems.Add(new BackupDisplayItem
             {
@@ -881,7 +908,7 @@ public sealed class MainViewModel : ViewModelBase
                 Key = svc.ServiceName,
                 Title = $"Служба Windows: {svc.ServiceName}",
                 Details = $"Исходный режим: {svc.OriginalStartMode} • Была запущена: {(svc.WasRunning ? "Да" : "Нет")}",
-                SavedAtText = "Резервная копия",
+                SavedAtText = svc.SavedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"),
                 RestoreCommand = new AsyncRelayCommand(async () =>
                 {
                     if (!IsAdministrator)
@@ -893,7 +920,7 @@ public sealed class MainViewModel : ViewModelBase
                     if (ok) _backup.RemoveDisabledService(svc.ServiceName);
                     RefreshBackupList();
                     ShowToast(msg, isError: !ok);
-                })
+                }, onError: HandleCommandError)
             });
         }
 
@@ -908,7 +935,7 @@ public sealed class MainViewModel : ViewModelBase
                 SavedAtText = st.DisabledAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"),
                 RestoreCommand = new AsyncRelayCommand(async () =>
                 {
-                    var (ok, msg, needsAdmin) = await Task.Run(() => PcAnalyzerService.RestoreStartupItemStatic(st, _backup, _logger));
+                    var (ok, msg, needsAdmin) = await Task.Run(() => StartupManagerService.RestoreStartupItem(st, _backup, _logger));
                     if (needsAdmin)
                     {
                         ElevateWithConfirmation("Права администратора", msg, "--tab 2");
@@ -916,7 +943,7 @@ public sealed class MainViewModel : ViewModelBase
                     }
                     RefreshBackupList();
                     ShowToast(msg, isError: !ok);
-                })
+                }, onError: HandleCommandError)
             });
         }
 
@@ -990,6 +1017,7 @@ public sealed class MainViewModel : ViewModelBase
     public async void ShowToast(string message, bool isError = false)
     {
         _toastCts?.Cancel();
+        _toastCts?.Dispose();
         _toastCts = new CancellationTokenSource();
         var token = _toastCts.Token;
 
@@ -1002,7 +1030,7 @@ public sealed class MainViewModel : ViewModelBase
             await Task.Delay(isError ? 6000 : 4200, token);
             IsToastVisible = false;
         }
-        catch (TaskCanceledException) { }
+        catch (OperationCanceledException) { }
     }
 
     private static void OpenFolder(string path)
@@ -1013,5 +1041,11 @@ public sealed class MainViewModel : ViewModelBase
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
         }
         catch { }
+    }
+
+    public void Dispose()
+    {
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
     }
 }

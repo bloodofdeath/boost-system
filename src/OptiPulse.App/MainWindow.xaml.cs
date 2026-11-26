@@ -35,21 +35,32 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
+            UpdateMaximizedChromeLayout();
             await _viewModel.InitializeAsync(App.StartupArgs);
             await TryCaptureScreenshotIfRequestedAsync(App.StartupArgs);
         };
-        StateChanged += (_, _) =>
-        {
-            MaximizeBtn.Content = WindowState == WindowState.Maximized ? "❐" : "▢";
-        };
+
+        StateChanged += (_, _) => UpdateMaximizedChromeLayout();
+        Closed += (_, _) => _viewModel.Dispose();
+    }
+
+    private void UpdateMaximizedChromeLayout()
+    {
+        bool isMax = WindowState == WindowState.Maximized;
+        MaximizeBtn.Content = isMax ? "❐" : "▢";
+        // Compensate for WindowChrome border overhang when maximized so edges & taskbar aren't clipped
+        RootBorder.Padding = isMax ? new Thickness(7) : new Thickness(0);
+        RootBorder.BorderThickness = isMax ? new Thickness(0) : new Thickness(1);
+        MaxHeight = SystemParameters.MaximizedPrimaryScreenHeight;
+        MaxWidth = SystemParameters.MaximizedPrimaryScreenWidth;
     }
 
     private async Task TryCaptureScreenshotIfRequestedAsync(string[] args)
     {
-        var idx = Array.FindIndex(args, a => a.Equals("--capture", StringComparison.OrdinalIgnoreCase));
-        if (idx < 0 || idx + 1 >= args.Length) return;
+        var cli = CliOptions.Parse(args);
+        if (string.IsNullOrWhiteSpace(cli.CaptureScreenshotPath)) return;
 
-        var outPath = args[idx + 1];
+        var outPath = cli.CaptureScreenshotPath;
         await Task.Delay(350);
         await Dispatcher.InvokeAsync(() =>
         {

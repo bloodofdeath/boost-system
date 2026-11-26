@@ -15,6 +15,9 @@ TestResults/
 *.coverage
 *.coveragexml
 
+# Local-only AI agent documentation (never upload to GitHub)
+CONTRIBUTING.md
+
 # Published releases & local reports
 releases/
 *.zip

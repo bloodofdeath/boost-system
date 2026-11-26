@@ -18,7 +18,7 @@
                             UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
 
-    <Border BorderBrush="#1F2430" BorderThickness="1" Background="#0D0F13">
+    <Border x:Name="RootBorder" BorderBrush="#1F2430" BorderThickness="1" Background="#0D0F13">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="60"/>
@@ -141,12 +141,20 @@
             <!-- ==================== OPTIONAL REBOOT BANNER ==================== -->
             <Border Grid.Row="1"
                     Visibility="{Binding IsRebootBannerVisible, Converter={StaticResource BoolToVis}}"
-                    Background="#152036" BorderBrush="#263B63" BorderThickness="0,0,0,1" Padding="24,9">
+                    Background="#152036" BorderBrush="#263B63" BorderThickness="0,0,0,1" Padding="24,10">
                 <Grid>
-                    <TextBlock Text="↻ Некоторые применённые системные параметры (драйвер GPU / NTFS) вступят в полную силу после перезагрузки Windows."
-                               Foreground="#93C5FD" FontSize="12.5" VerticalAlignment="Center"/>
-                    <Button Content="Скрыть" Style="{StaticResource DarkSecondaryButton}" Padding="10,4" FontSize="11.5"
-                            HorizontalAlignment="Right" Command="{Binding DismissRebootBannerCommand}"/>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="↻ Рекомендуется перезагрузка ПК для стабильной работы"
+                                   Foreground="#BFDBFE" FontSize="12.5" FontWeight="SemiBold"/>
+                        <TextBlock Text="Ядро Windows, драйверы видеокарты (HAGS / GPU), файловая система NTFS и буферы ввода считывают изменённые ключи реестра только при загрузке ОС. Перезагрузка применит все параметры целиком и исключит конфликты со старыми настройками в памяти."
+                                   Foreground="#93C5FD" FontSize="11.5" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Скрыть" Style="{StaticResource DarkSecondaryButton}" Padding="12,5" FontSize="11.5"
+                            VerticalAlignment="Center" Command="{Binding DismissRebootBannerCommand}"/>
                 </Grid>
             </Border>
 
@@ -170,22 +178,22 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Left: Category pills + verified status counter -->
+                            <!-- Left: Two-way bound Category pills + verified status counter -->
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <RadioButton Content="Все (14)" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter" IsChecked="True"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="ALL"/>
+                                <RadioButton Content="{Binding AllFilterLabel}" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=ALL}"/>
                                 <RadioButton Content="Включённые" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="ACTIVE"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=ACTIVE}"/>
                                 <RadioButton Content="Выключенные" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="INACTIVE"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=INACTIVE}"/>
                                 <RadioButton Content="GPU и Игры" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="GPU"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=GPU}"/>
                                 <RadioButton Content="CPU и Система" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="CPU"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=CPU}"/>
                                 <RadioButton Content="Сеть и Ввод" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="NET"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=NET}"/>
                                 <RadioButton Content="Диск и ОЗУ" Style="{StaticResource FilterPillStyle}" GroupName="CatFilter"
-                                             Command="{Binding SelectCategoryCommand}" CommandParameter="DISK"/>
+                                             IsChecked="{Binding SelectedCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=DISK}"/>
 
                                 <Border Background="#152620" BorderBrush="#204D3B" BorderThickness="1" CornerRadius="14" Padding="10,4" Margin="6,0,12,0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding ActiveCounterText}" FontSize="11.5" FontWeight="SemiBold" Foreground="#34E59E"/>
@@ -303,17 +311,11 @@
                                                 </StackPanel>
                                             </Grid>
 
-                                            <!-- Card Middle: Title (+ Beta Pill) & Description -->
+                                            <!-- Card Middle: Title & Description -->
                                             <StackPanel Grid.Row="1" Margin="0,0,0,14">
-                                                <WrapPanel Orientation="Horizontal" Margin="0,0,0,7">
-                                                    <TextBlock Text="{Binding Title}"
-                                                               FontSize="14.5" FontWeight="Bold" Foreground="#F3F5F8"
-                                                               TextWrapping="Wrap" Margin="0,0,8,0"/>
-                                                    <Border Visibility="{Binding IsBeta, Converter={StaticResource BoolToVis}}"
-                                                            Background="#1B2A47" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
-                                                        <TextBlock Text="Бета" FontSize="10.5" FontWeight="SemiBold" Foreground="#60A5FA"/>
-                                                    </Border>
-                                                </WrapPanel>
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontSize="14.5" FontWeight="Bold" Foreground="#F3F5F8"
+                                                           TextWrapping="Wrap" Margin="0,0,0,7"/>
 
                                                 <TextBlock Text="{Binding Description}"
                                                            FontSize="12.5" Foreground="#8A92A3"
@@ -546,19 +548,19 @@
                                 </RadioButton>
                             </StackPanel>
 
-                            <!-- Category Filter for Recommendations Sub-tab -->
+                            <!-- Two-way Category Filter for Recommendations Sub-tab -->
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                                         Visibility="{Binding SelectedReportSubTab, Converter={StaticResource IntEqToVis}, ConverterParameter=0}">
-                                <RadioButton Content="Все" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter" IsChecked="True"
-                                             Command="{Binding SelectReportCategoryCommand}" CommandParameter="ALL"/>
+                                <RadioButton Content="Все" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter"
+                                             IsChecked="{Binding SelectedReportCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=ALL}"/>
                                 <RadioButton Content="Игры и Система" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter"
-                                             Command="{Binding SelectReportCategoryCommand}" CommandParameter="SYS"/>
+                                             IsChecked="{Binding SelectedReportCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=SYS}"/>
                                 <RadioButton Content="Службы" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter"
-                                             Command="{Binding SelectReportCategoryCommand}" CommandParameter="SVC"/>
+                                             IsChecked="{Binding SelectedReportCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=SVC}"/>
                                 <RadioButton Content="Автозагрузка" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter"
-                                             Command="{Binding SelectReportCategoryCommand}" CommandParameter="STARTUP"/>
+                                             IsChecked="{Binding SelectedReportCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=STARTUP}"/>
                                 <RadioButton Content="Оформление" Style="{StaticResource FilterPillStyle}" GroupName="RecCatFilter"
-                                             Command="{Binding SelectReportCategoryCommand}" CommandParameter="VISUAL"/>
+                                             IsChecked="{Binding SelectedReportCategoryFilter, Converter={StaticResource StrEqToBool}, ConverterParameter=VISUAL}"/>
                             </StackPanel>
                         </Grid>
 
@@ -787,7 +789,7 @@
                 </Grid>
 
                 <!-- ========================================================= -->
-                <!-- TAB 3: TRANSPARENT ACTIVITY LOG                           -->
+                <!-- TAB 3: TRANSPARENT ACTIVITY LOG (VIRTUALIZED)             -->
                 <!-- ========================================================= -->
                 <Grid Visibility="{Binding SelectedMainTab, Converter={StaticResource IntEqToVis}, ConverterParameter=3}" Margin="24,18,24,20">
                     <Grid.RowDefinitions>
@@ -808,25 +810,23 @@
                     </Grid>
 
                     <Border Grid.Row="1" Background="#12141A" BorderBrush="#232836" BorderThickness="1" CornerRadius="10" Padding="12">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding LogEntries}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="0,0,0,6">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="68"/>
-                                                <ColumnDefinition Width="125"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="{Binding FormattedTimestamp}" FontFamily="Consolas" FontSize="12" Foreground="#666E7F"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Source}" FontFamily="Consolas" FontSize="12" Foreground="#7E89A1" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="{Binding Message}" FontFamily="Consolas" FontSize="12"
-                                                       Foreground="{Binding Level, Converter={StaticResource LogLevelToBrush}}" TextWrapping="Wrap"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                        <ListBox ItemsSource="{Binding LogEntries}" Style="{StaticResource ChromelessVirtualizedListBox}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="68"/>
+                                            <ColumnDefinition Width="125"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding FormattedTimestamp}" FontFamily="Consolas" FontSize="12" Foreground="#666E7F"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Source}" FontFamily="Consolas" FontSize="12" Foreground="#7E89A1" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Message}" FontFamily="Consolas" FontSize="12"
+                                                   Foreground="{Binding Level, Converter={StaticResource LogLevelToBrush}}" TextWrapping="Wrap"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Border>
                 </Grid>
 
